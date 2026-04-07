@@ -218,6 +218,25 @@ Invoke-WebRequest -Uri "http://localhost:8092" -UseBasicParsing -TimeoutSec 10
 # 成功响应：StatusCode = 200
 ```
 
+##### 18. 启动Document Server（文档编辑服务）
+
+Document Server是独立外部服务，需要单独启动。它被后端服务调用来处理文档编辑，用户不直接访问。
+
+```powershell
+# 步骤1：创建Document Server端口映射配置
+# 创建 E:\mycode\DocSpace\buildtools\install\docker\ds-ports.yml 内容如下：
+@"
+services:
+  onlyoffice-document-server:
+    ports:
+      - ""8085:80""
+}
+"@ | Out-File -FilePath E:\mycode\DocSpace\buildtools\install\docker\ds-ports.yml -Encoding UTF8
+
+# 步骤2：启动Document Server
+wsl -d Ubuntu-24.04 -u administrator -- bash -c "cd /mnt/e/mycode/DocSpace/buildtools/install/docker && docker compose -f ds.yml -f ds-ports.yml up -d"
+```
+
 ---
 
 ## 核心要点总结
@@ -413,11 +432,12 @@ http://localhost:8081
 ```
 
 ### 端口映射说明
-| 容器端口 | 宿主机端口 | Windows访问地址 |
-|---------|-----------|----------------|
-| 8092 | 8092 | http://localhost:8092 |
-| 8081 | 8081 | http://localhost:8081 |
-| 8099 | 8099 | http://localhost:8099 |
-| 5050 | 8050 | http://localhost:8050 |
-| 5050 | 8051 | http://localhost:8051 |
-| 5050 | 8052 | http://localhost:8052 |
+| 容器端口 | 宿主机端口 | Windows访问地址 | 说明 |
+|---------|-----------|----------------|------|
+| 8092 | 8092 | http://localhost:8092 | DocSpace主入口（Router） |
+| 8081 | 8081 | http://localhost:8081 | API入口 |
+| 8099 | 8099 | http://localhost:8099 | 备用入口 |
+| 5050 | 8050 | http://localhost:8050 | dotnet内部服务 |
+| 5050 | 8051 | http://localhost:8051 | java内部服务 |
+| 5050 | 8052 | http://localhost:8052 | node内部服务 |
+| 80 | 8085 | http://localhost:8085 | Document Server（内部服务） |
