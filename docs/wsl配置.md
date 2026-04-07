@@ -85,6 +85,19 @@ wsl -d Ubuntu-24.04 -u root -- bash -c "echo 'administrator:666888' | chpasswd"
 wsl -d Ubuntu-24.04 -u administrator -- bash -c "echo 666888 | sudo -S apt update && echo 666888 | sudo -S apt install -y docker.io docker-compose-v2"
 ```
 
+##### 6.1 Docker安装位置说明
+
+**WSL中Ubuntu的Docker位置：**
+- 可执行文件：`/usr/bin/docker`
+- 配置文件目录：`/etc/docker/`
+- Docker根目录：`/var/lib/docker`
+- 服务文件：`/usr/lib/systemd/system/docker.service`
+
+**与Windows Docker的区别：**
+- WSL中的Docker运行在Linux环境中，独立于Windows的Docker Desktop
+- 两个Docker实例使用不同的配置和数据存储
+- 版本可能不同（WSL中为28.2.2，Windows中为27.4.0）
+
 ##### 7. 将用户添加到docker组
 
 ```powershell
@@ -342,6 +355,68 @@ ubuntu24 config --default-user administrator
 # 原因：默认配置只有expose，没有ports映射
 # 解决方案：使用端口映射配置文件
 wsl -d Ubuntu-24.04 -u administrator -- bash -c "cd /mnt/e/mycode/DocSpace/buildtools/install/docker && docker compose -f docspace-stack.yml -f docspace-ports.yml up -d"
+```
+
+### Q9: Docker命令连接到Windows Docker Desktop而非WSL Docker
+```powershell
+# 问题表现：docker ps显示的是Windows Docker Desktop的容器，而非WSL中的容器
+# 或者出现 "Cannot connect to the Docker daemon" 错误
+
+# 原因：Docker Desktop会修改WSL中docker的默认context，指向Windows Docker
+# 关闭Docker Desktop后，context可能没有正确切回本地
+
+# 解决方法1：检查并切换docker context
+wsl -d Ubuntu-24.04 -u administrator -- bash -c "docker context ls"
+# 确保default前面有*号，如果没有，执行：
+wsl -d Ubuntu-24.04 -u administrator -- bash -c "docker context use default"
+
+# 解决方法2：如果dockerd无法正常启动，重启WSL
+wsl --shutdown
+
+# 验证：重启后检查docker版本
+wsl -d Ubuntu-24.04 -u administrator -- bash -c "docker version"
+# 应该看到 Client 和 Server 版本都是 28.2.2（WSL中的版本）
+# 如果Server版本是27.4.0，说明还连接到Windows Docker Desktop
+```
+
+### Q10: dockerd启动卡住无法加载容器
+```powershell
+# 问题表现：dockerd启动时卡住，socket文件无法创建
+# 原因：可能是之前在Docker Desktop下创建的容器网络配置无法解析
+
+# 解决方法：重启WSL
+wsl --shutdown
+
+# 重启后WSL中的Docker应该能正常启动
+```
+
+### Q11: 如何避免Docker Desktop修改WSL中的Docker上下文
+```powershell
+# 方法1（推荐且有效）：禁用Docker Desktop的WSL集成
+# 打开Docker Desktop -> Settings -> Resources -> WSL Integration
+# 取消勾选与Ubuntu-24.04的集成
+# 这样Docker Desktop就不会影响WSL中的docker命令
+# 验证：docker version 的 Server 版本应该是 28.2.2（WSL Docker）
+
+# 方法2：删除desktop-linux上下文（不可靠）
+wsl -d Ubuntu-24.04 -u administrator -- bash -c "docker context rm desktop-linux"
+# 注意：此方法不完全可靠，Docker Desktop启动后仍可能"劫持"docker命令
+
+# 方法3：设置默认context为default
+wsl -d Ubuntu-24.04 -u administrator -- bash -c "docker context use default"
+
+# 验证设置
+wsl -d Ubuntu-24.04 -u administrator -- bash -c "docker context ls"
+wsl -d Ubuntu-24.04 -u administrator -- bash -c "docker version"
+# 确保Server版本是28.2.2（WSL Docker），不是27.4.0（Docker Desktop）
+```
+
+### Q12: 长期解决方案 - 卸载WSL中的docker.io
+```powershell
+# 如果主要使用Docker Desktop，可以卸载WSL中独立安装的docker.io
+wsl -d Ubuntu-24.04 -u administrator -- bash -c "echo 666888 | sudo -S apt remove -y docker.io docker-compose-v2"
+
+# 这样就只会使用Docker Desktop的Docker，避免冲突
 ```
 
 ---
