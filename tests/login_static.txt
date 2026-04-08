@@ -1,0 +1,4 @@
+    location /login {
+            root /var/www/build/login;
+            try_files $uri /login/index.html;
+    }

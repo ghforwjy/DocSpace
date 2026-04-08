@@ -69,6 +69,7 @@ map onlyoffice-dotnet-services:5157 $service_ai            # AI服务
 # Java 服务
 map onlyoffice-java-services:8080 $service_identity     # 身份服务
 map onlyoffice-java-services:9090 $service_identity_api # 身份API
+map onlyoffice-java-services:5100 $service_apicache     # API缓存服务
 ```
 
 ### 3.2 路由规则表
@@ -92,6 +93,7 @@ map onlyoffice-java-services:9090 $service_identity_api # 身份API
 | `/sso/*` | ASC.SsoAuth | 9834 | SSO认证 |
 | `/healthchecks/*` | 健康检查 | 5033 | 健康检查端点 |
 | `/ai/*` | ASC.AI | 5157 | AI服务 |
+| `/apicache/*` | API Cache | 5100 | API缓存服务 |
 
 ### 3.3 详细路由配置
 
@@ -139,6 +141,15 @@ location /socket.io {
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
+}
+```
+
+#### API Cache路由 (/apicache)
+
+```nginx
+location /apicache {
+    rewrite apicache/(.*) /$1  break;
+    proxy_pass http://onlyoffice-java-services:5100;
 }
 ```
 

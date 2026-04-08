@@ -1,0 +1,4 @@
+                location ~* /authentication {
+                         proxy_pass http://$service_login;
+                }
+
