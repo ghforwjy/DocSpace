@@ -423,26 +423,88 @@ wsl -d Ubuntu-24.04 -u administrator -- bash -c "echo 666888 | sudo -S apt remov
 
 ## 代理配置说明
 
-### Windows宿主机信息
-- 代理端口：7897
-- Windows宿主机IP：192.168.2.113
-- WSL默认网关：192.168.2.1
+### WSL2 NAT模式下访问Windows宿主机代理
 
-### WSL中测试代理
+#### 问题背景
+WSL2 使用 NAT 模式，无法直接访问 Windows 宿主机的 `127.0.0.1`（localhost）。如果代理软件只监听 `127.0.0.1:端口`，WSL 将无法连接。
+
+#### 解决步骤
+
+**步骤1：获取WSL网关IP（Windows宿主机在WSL中的IP）**
 ```powershell
-# 测试代理连通性
-wsl -d Ubuntu-24.04 -u administrator -- bash -c "curl -x http://127.0.0.1:7897 --connect-timeout 5 -s -o /dev/null -w '%{http_code}' https://www.google.com"
+# 在WSL中查看默认网关，这就是Windows宿主机的IP
+wsl -d Ubuntu-24.04 -u administrator -- bash -c "ip route | grep default"
+# 输出示例：default via 172.20.128.1 dev eth0
+# 则Windows宿主机IP为：172.20.128.1
+```
+
+**步骤2：开启代理软件的"允许局域网连接"**
+
+| 代理软件 | 设置位置 |
+|---------|---------|
+| Shadowsocks | 右键图标 → 服务器 → 编辑服务器 → 勾选"允许来自局域网的连接" |
+| Clash | Settings → Allow LAN |
+| v2rayN | 参数设置 → 允许来自局域网的连接 |
+
+**步骤3：验证代理可从WSL访问**
+```powershell
+# 使用WSL网关IP测试代理连通性（将172.20.128.1替换为实际网关IP）
+wsl -d Ubuntu-24.04 -u administrator -- bash -c "curl -x http://172.20.128.1:1080 --connect-timeout 10 -s -o /dev/null -w '%{http_code}' https://www.google.com"
 # 输出200表示代理可用
 ```
 
-### 重要发现
-1. **daemon.json中的proxies配置**：这个配置是为Docker Client配置代理，不是为Docker Daemon配置。Docker拉取镜像时使用的是registry-mirrors（镜像加速器）。
+**步骤4：配置Docker使用宿主机代理**
+```powershell
+# 创建daemon.json配置文件（使用实际网关IP）
+$daemonJson = @'
+{
+  "registry-mirrors": [
+    "https://docker.mirrors.ustc.edu.cn",
+    "https://hub-mirror.c.163.com"
+  ],
+  "proxies": {
+    "http-proxy": "http://172.20.128.1:1080",
+    "https-proxy": "http://172.20.128.1:1080",
+    "no-proxy": "localhost,127.0.0.1,.local"
+  }
+}
+'@
+$daemonJson | Out-File -FilePath "F:\mycode\industry tools\DocSpace\daemon.json" -Encoding UTF8
 
-2. **WSL代理访问**：WSL2在NAT模式下，无法直接访问Windows的127.0.0.1代理（除非代理开启Allow LAN）。
+# 复制到WSL
+wsl -d Ubuntu-24.04 -u administrator -- bash -c "echo '666888' | sudo -S mkdir -p /etc/docker && echo '666888' | sudo -S cp /mnt/f/mycode/industry\ tools/DocSpace/daemon.json /etc/docker/daemon.json"
 
-3. **镜像加速器生效**：由于配置了国内镜像加速器，实际拉取镜像时不需要代理也能正常工作。
+# 重启Docker服务
+wsl -d Ubuntu-24.04 -u administrator -- bash -c "echo '666888' | sudo -S pkill dockerd 2>/dev/null; sleep 2; echo '666888' | sudo -S dockerd > /tmp/dockerd.log 2>&1 &"
 
-4. **expose vs ports**：Docker的`expose`只在内部网络暴露，Windows无法访问；必须使用`ports`映射才能让Windows访问服务。
+# 验证代理配置生效
+wsl -d Ubuntu-24.04 -u administrator -- bash -c "docker info 2>/dev/null | grep -i proxy"
+```
+
+#### 关键要点
+
+1. **WSL2 NAT模式**：WSL2无法直接访问Windows的`127.0.0.1`，必须通过网关IP访问
+2. **代理监听地址**：代理软件必须监听`0.0.0.0`（所有接口），而不仅是`127.0.0.1`
+3. **动态IP问题**：WSL网关IP可能在重启后变化，需要重新获取
+4. **验证方法**：使用`netstat -an | findstr "1080"`查看代理是否监听`0.0.0.0:1080`
+
+#### 常见问题
+
+**Q: 代理软件已开启LAN访问，但WSL仍无法连接**
+- 检查Windows防火墙是否阻止了该端口
+- 尝试临时关闭防火墙测试：`netsh advfirewall set allprofiles state off`
+
+**Q: WSL网关IP每次重启都变，如何自动获取**
+```bash
+# 在WSL中自动获取网关IP
+GATEWAY_IP=$(ip route | grep default | awk '{print $3}')
+echo $GATEWAY_IP
+```
+
+**Q: 配置后Docker拉取镜像仍超时**
+- 优先使用国内镜像加速器（已配置ustc和163镜像）
+- 检查代理是否支持Docker Hub的HTTPS连接
+- 查看Docker日志：`wsl -d Ubuntu-24.04 -u administrator -- bash -c "cat /tmp/dockerd.log"`
 
 ---
 
