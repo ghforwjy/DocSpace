@@ -965,7 +965,7 @@ http://localhost:8081
 | 基础镜像 | 多阶段构建 | `node:22-slim` |
 | 源码 | 无（预编译） | 无（通过 volume 映射） |
 | pnpm | 无 | 已安装（v10.20.0） |
-| 入口命令 | `python3 docker-entrypoint.py` | `tail -f /dev/null`（保持运行） |
+| 入口命令 | `python3 docker-entrypoint.py` | `python3 docker-entrypoint.py` |
 | 用途 | 生产部署 | 开发调试 |
 
 ### 构建开发镜像
