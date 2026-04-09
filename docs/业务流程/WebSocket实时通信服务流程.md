@@ -595,33 +595,91 @@ node server.js --app.port=9899 --app.appsettings=/app/onlyoffice/config --app.en
 
 ---
 
-## 16. 遗留问题
+## 16. 问题修复记录
 
-### 16.1 Supervisor FATAL 状态问题
+### 16.1 ASC.Socket.IO 和 ASC.SsoAuth 服务 FATAL 问题
 
 **问题描述**：
-- 手动启动 ASC.Socket.IO 服务可以成功运行，端口 9899 正常监听
-- 通过 Supervisor 启动时，服务报告 FATAL 状态 (Exited too quickly)
-- 前端 WebSocket 连接实际可用（因为手动启动的进程在运行）
+- ASC.Socket.IO 和 ASC.SsoAuth 服务处于 FATAL 状态
+- 错误日志：`Cannot read properties of undefined (reading 'cloudWatch')`
+- 服务启动后立即退出，无法保持运行
 
-**可能原因**：
-1. Supervisor 的 `startsecs=25` 配置要求服务运行25秒才认为启动成功
-2. 手动测试时等待时间不足
-3. Supervisor 启动参数与环境变量传递方式可能存在差异
+**根本原因**：
+1. **配置路径错误**：Supervisor 配置中 `PATH_TO_CONF="/app/onlyoffice/config/appsettings.json"` 是**文件路径**，但 Node.js 服务期望的是**目录路径**
+2. **端口绑定缺失**：ASC.Socket.IO 和 ASC.SsoAuth 缺少 `--app.host=0.0.0.0` 参数，导致服务只监听 localhost，无法被其他容器访问
 
-**当前状态**：
-- ✅ 服务功能正常（手动启动验证）
-- ⚠️ Supervisor 启动机制存在问题
-- ✅ 前端 WebSocket 连接成功
+**问题分析**：
+- 配置文件路径：`/app/onlyoffice/config/appsettings.json`（文件）
+- 代码期望路径：`/app/onlyoffice/config`（目录）
+- nconf 配置加载器会自动拼接：`/app/onlyoffice/config/appsettings.json`
+- 当传入文件路径时，代码再次拼接导致路径不存在
 
-**待解决**：
-1. 验证 Supervisor 配置中的 `startsecs` 参数
-2. 检查 Supervisor 启动时的环境变量传递
-3. 确保容器重启后服务能自动恢复
+**修复过程**：
 
-### 16.2 ASC.SsoAuth 服务同样 FATAL
+1. **诊断问题**
+```bash
+# 检查服务状态
+docker exec onlyoffice-node-services supervisorctl status
 
-ASC.SsoAuth 服务也处于 FATAL 状态，可能存在相同的配置加载问题，需要同步排查。
+# 查看错误日志
+docker exec onlyoffice-node-services cat /var/log/supervisor/ASC.Socket.IO-stderr---supervisor-*.log
+```
+
+2. **修复 Supervisor 配置**
+```bash
+# 进入容器修改配置
+docker exec -it onlyoffice-node-services /bin/bash
+
+# 修复 PATH_TO_CONF（文件路径改为目录路径）
+sed -i 's|PATH_TO_CONF="/app/onlyoffice/config/appsettings.json"|PATH_TO_CONF="/app/onlyoffice/config"|g' /etc/supervisor/conf.d/supervisord.conf
+
+# 给 ASC.Socket.IO 添加 --app.host=0.0.0.0
+sed -i 's|command=/usr/local/bin/node server.js --app.port=%(ENV_SERVICE_SOCKET_PORT)s --app.appsettings|command=/usr/local/bin/node server.js --app.port=%(ENV_SERVICE_SOCKET_PORT)s --app.host=0.0.0.0 --app.appsettings|g' /etc/supervisor/conf.d/supervisord.conf
+
+# 给 ASC.SsoAuth 添加 --app.host=0.0.0.0
+sed -i 's|command=/usr/local/bin/node app.js --app.port=%(ENV_SERVICE_SSOAUTH_PORT)s --app.appsettings|command=/usr/local/bin/node app.js --app.port=%(ENV_SERVICE_SSOAUTH_PORT)s --app.host=0.0.0.0 --app.appsettings|g' /etc/supervisor/conf.d/supervisord.conf
+```
+
+3. **验证修改结果**
+```bash
+# 确认配置已修改
+docker exec onlyoffice-node-services grep "PATH_TO_CONF" /etc/supervisor/conf.d/supervisord.conf
+docker exec onlyoffice-node-services grep -A1 "ASC.Socket.IO" /etc/supervisor/conf.d/supervisord.conf
+docker exec onlyoffice-node-services grep -A1 "ASC.SsoAuth" /etc/supervisor/conf.d/supervisord.conf
+```
+
+4. **重新加载 Supervisor 配置**
+```bash
+docker exec onlyoffice-node-services supervisorctl reread
+docker exec onlyoffice-node-services supervisorctl update
+```
+
+5. **验证服务状态**
+```bash
+# 等待服务启动
+sleep 30
+
+# 检查所有服务状态
+docker exec onlyoffice-node-services supervisorctl status
+```
+
+**修复后配置对比**：
+
+| 配置项 | 修复前 | 修复后 |
+|--------|--------|--------|
+| PATH_TO_CONF | `/app/onlyoffice/config/appsettings.json` | `/app/onlyoffice/config` |
+| ASC.Socket.IO command | `--app.port=9899 --app.appsettings` | `--app.port=9899 --app.host=0.0.0.0 --app.appsettings` |
+| ASC.SsoAuth command | `--app.port=9834 --app.appsettings` | `--app.port=9834 --app.host=0.0.0.0 --app.appsettings` |
+
+**修复结果**：
+- ✅ ASC.Socket.IO: RUNNING
+- ✅ ASC.SsoAuth: RUNNING
+- ✅ onlyoffice-node-services 容器: healthy
+
+**经验总结**：
+1. Node.js 服务的 `--app.appsettings` 参数应传递**目录路径**而非文件路径
+2. 服务需要显式指定 `--app.host=0.0.0.0` 才能接受外部连接
+3. Supervisor 配置修改后需要 `reread` 和 `update` 才能生效
 
 ---
 
