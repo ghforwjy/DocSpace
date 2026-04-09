@@ -155,7 +155,7 @@ location /apicache {
 
 ## 4. 已知问题
 
-### 4.1 Node.js 服务监听地址问题
+### 4.1 Node.js 服务监听地址问题 ✅ 已修复
 
 **问题描述**：Router 将请求代理到 Node.js 服务（如 ASC.Login），但由于 Node.js 服务只监听容器内部IP，未监听 `127.0.0.1` 或 `0.0.0.0`，导致代理连接失败。
 
@@ -171,7 +171,27 @@ location /apicache {
 - `/socket.io/*` → ASC.Socket.IO (9899)
 - `/sso/*` → ASC.SsoAuth (9834)
 
-**根本原因**：Node.js 服务启动时只监听容器内部IP，未监听 `0.0.0.0`
+**修复方案**（已完成）：
+
+在 Supervisor 配置中添加 `--app.host=0.0.0.0` 参数，让 Node.js 服务监听所有网络接口：
+
+```ini
+# buildtools/install/docker/config/supervisor/node_services.conf
+[program:ASC.Login]
+command=/usr/local/bin/node server.js --app.port=%(ENV_SERVICE_LOGIN_PORT)s --app.host=0.0.0.0 --app.appsettings=%(ENV_PATH_TO_CONF)s --app.environment=%(ENV_INSTALLATION_TYPE)s
+```
+
+**验证修复**：
+
+```bash
+# 查看服务状态
+docker exec onlyoffice-node-services supervisorctl status
+# 所有 Node.js 服务应显示 RUNNING
+
+# 测试登录路由
+curl -I http://localhost:8092/login
+# 应返回 200
+```
 
 ## 5. 排查命令
 

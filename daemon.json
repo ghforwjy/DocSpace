@@ -1,11 +1,11 @@
-﻿{
+{
   "registry-mirrors": [
     "https://docker.mirrors.ustc.edu.cn",
     "https://hub-mirror.c.163.com"
   ],
   "proxies": {
-    "http-proxy": "http://172.20.128.1:1080",
-    "https-proxy": "http://172.20.128.1:1080",
+    "http-proxy": "http://127.0.0.1:1080",
+    "https-proxy": "http://127.0.0.1:1080",
     "no-proxy": "localhost,127.0.0.1,.local"
   }
 }
