@@ -948,3 +948,122 @@ http://localhost:8081
 
 **注意**：配置HTTPS后，Document Server的8085端口会被nginx重定向到8443的HTTPS，建议直接使用8443端口访问。
 
+## 开发镜像说明
+
+### 概述
+
+开发镜像（`Dockerfile.dev`）是基于 `node:22-slim` 构建的专用开发环境，已安装 pnpm 等编译工具链，支持在容器内直接编译源码。
+
+### 文件位置
+
+- `buildtools/install/docker/Dockerfile.dev` - 开发专用 Dockerfile
+
+### 与生产镜像的区别
+
+| 特性 | 生产镜像 (`Dockerfile.app`) | 开发镜像 (`Dockerfile.dev`) |
+|------|--------------------------|--------------------------|
+| 基础镜像 | 多阶段构建 | `node:22-slim` |
+| 源码 | 无（预编译） | 无（通过 volume 映射） |
+| pnpm | 无 | 已安装（v10.20.0） |
+| 入口命令 | `python3 docker-entrypoint.py` | `tail -f /dev/null`（保持运行） |
+| 用途 | 生产部署 | 开发调试 |
+
+### 构建开发镜像
+
+```bash
+cd <项目根目录在WSL中的路径>/buildtools/install/docker
+
+# 构建 dev 镜像
+docker compose -f docspace-stack.yml build onlyoffice-node-services
+```
+
+### 启用开发容器
+
+#### 1. 配置代理（如果需要）
+
+容器内访问外网需要通过宿主机代理。在 Ubuntu 终端中执行：
+
+```bash
+# 确认宿主机网关地址
+ip route | grep default | awk '{print $3}'
+
+# 测试代理连通性（替换 <网关IP> 和 <代理端口>）
+curl -x http://<网关IP>:<代理端口> --connect-timeout 10 https://www.google.com
+```
+
+#### 2. 启动容器
+
+```bash
+cd <项目根目录在WSL中的路径>/buildtools/install/docker
+
+# 启动 node-services 容器（带源码映射）
+docker compose -f docspace-stack.yml -f docspace-ports.yml up -d onlyoffice-node-services
+```
+
+#### 3. 进入容器
+
+```bash
+docker exec -it onlyoffice-node-services bash
+```
+
+### 在容器内编译代码
+
+#### 1. 设置代理（如果需要）
+
+```bash
+export HTTP_PROXY=http://host.docker.internal:1080
+export HTTPS_PROXY=http://host.docker.internal:1080
+```
+
+#### 2. 安装依赖
+
+```bash
+cd /var/www/products/ASC.Management/management
+pnpm install
+```
+
+#### 3. 编译
+
+```bash
+# 编译所有项目
+pnpm build
+
+# 或编译特定项目
+pnpm nx run @docspace/management:build
+```
+
+#### 4. 清理锁文件（如需重新编译）
+
+```bash
+rm -rf /var/www/products/ASC.Management/management/packages/*/.next/lock
+```
+
+### 源码映射说明
+
+`docspace-ports.yml` 中配置了源码映射：
+
+```yaml
+onlyoffice-node-services:
+  volumes:
+    - /mnt/f/mycode/industry tools/DocSpace/client:/var/www/products/ASC.Management/management:rw
+```
+
+这会将本地 `client` 目录映射到容器的 `management` 目录。修改本地源码后，容器内可直接看到变化。
+
+### 停止开发容器
+
+```bash
+# 停止容器
+docker compose -f docspace-stack.yml -f docspace-ports.yml stop onlyoffice-node-services
+
+# 或删除容器
+docker compose -f docspace-stack.yml -f docspace-ports.yml down onlyoffice-node-services
+```
+
+### 注意事项
+
+1. **代理配置**：构建镜像时已设置 npm 国内镜像源，运行时如需代理请在命令中指定
+2. **首次编译**：首次 `pnpm install` 需要下载大量依赖，确保网络通畅
+3. **锁文件**：如果编译失败，先清理 `packages/*/.next/lock` 再重试
+4. **资源占用**：编译过程消耗较多 CPU 和内存，确保容器有足够资源
+
