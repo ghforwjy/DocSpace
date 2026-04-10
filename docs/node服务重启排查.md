@@ -363,10 +363,44 @@ Docker状态: 所有容器正常运行
 
 | 问题 | 原因 | 解决方案 |
 |------|------|----------|
-| WSL 频繁重启 | WSL 2.6.3 版本的 Plan9 bug | 更新 WSL 到预发布版本 2.7.1 |
+| WSL 频繁重启 | WSL 2.6.3 版本的 Plan9 bug | 更新 WSL 到预发布版本 2.7.1 + 禁用 interop 和 automount |
 | DNS 解析失败 | WSL 连接检查失败 | 修改 hosts 文件添加 msftconnecttest.com |
 | Windows PATH 转换失败 | PATH 中包含无效路径 | 在 wsl.conf 中设置 `appendWindowsPath = false` |
 | Docker 不自动启动 | systemd 被禁用 | 恢复 systemd=true |
+
+### 最终解决方案
+
+**1. 更新 WSL 到预发布版本**：
+```bash
+wsl --update --pre-release
+```
+
+**2. 修改 `/etc/wsl.conf`**：
+```ini
+[boot]
+systemd=true
+
+[user]
+default=administrator
+
+[network]
+generateResolvConf = false
+
+[interop]
+enabled = false
+appendWindowsPath = false
+
+[automount]
+enabled = false
+```
+
+**3. 修改 Windows hosts 文件**（`C:\Windows\System32\drivers\etc\hosts`）：
+```
+127.0.0.2 www.msftconnecttest.com
+127.0.0.2 ipv6.msftconnecttest.com
+::1 www.msftconnecttest.com
+::1 ipv6.msftconnecttest.com
+```
 
 ### 最终验证结果
 
@@ -374,14 +408,14 @@ Docker状态: 所有容器正常运行
 WSL版本: 2.7.1.0
 内核版本: 6.6.114.1-1
 
-WSL运行时间: up 5 min, 1 user, load average: 0.59
+WSL运行时间: up 13 min, 1 user, load average: 0.25
 
 容器状态:
-- onlyoffice-router: Up 5 minutes (healthy)
-- onlyoffice-dotnet-services: Up 5 minutes (healthy)
-- onlyoffice-node-services: Up 5 minutes (healthy)
-- onlyoffice-java-services: Up 5 minutes (healthy)
-- 其他基础服务: Up 5 minutes (healthy)
+- onlyoffice-router: Up 13 minutes (healthy)
+- onlyoffice-dotnet-services: Up 13 minutes (healthy)
+- onlyoffice-node-services: Up 13 minutes (healthy)
+- onlyoffice-java-services: Up 13 minutes (healthy)
+- 其他基础服务: Up 13 minutes (healthy)
 ```
 
 **访问地址**：

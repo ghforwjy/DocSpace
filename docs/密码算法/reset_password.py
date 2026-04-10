@@ -20,8 +20,9 @@ import base64
 # 从 appsettings.json 中的 core:machinekey 获取
 machine_key = "DocSpace2024CoreMachineKeyForEncryption123!"
 
-# 要重置密码的用户ID
-# 可通过 SQL 查询: SELECT id FROM core_user WHERE username='administrator';
+# 要重置密码的用户信息
+# 默认管理员账号: administrator / wjy@test.com
+# 可通过 SQL 查询: SELECT id, username, email FROM core_user WHERE username='administrator';
 user_id = "66faa6e4-f133-11ea-b126-00ffeec8b4ef"
 
 # 新密码
