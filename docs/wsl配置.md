@@ -886,7 +886,13 @@ echo $GATEWAY_IP
 
 ### 启动所有服务（带端口映射，Windows可访问）
 
+**重要**：启动服务前必须确认 `.env` 中 `DOCKER_TAG=latest`，否则可能启动错误的镜像。
+
 ```powershell
+# 0. 确认 .env 中 DOCKER_TAG=latest（不是 dev）
+cd <项目根目录在WSL中的路径>/buildtools/install/docker
+grep DOCKER_TAG .env
+
 # 1. 启动Docker（如未运行）
 wsl -d Ubuntu-24.04 -u administrator -- bash -c "echo 666888 | sudo -S pkill dockerd 2>/dev/null; sleep 2; echo 666888 | sudo -S dockerd > /tmp/dockerd.log 2>&1 &"
 
@@ -970,16 +976,49 @@ http://localhost:8081
 
 ### 构建开发镜像
 
+**重要**：构建 dev 镜像前必须检查 `.env` 中的 `DOCKER_TAG`，必须使用 `dev` 而非 `latest`，否则会覆盖生产镜像。
+
 ```bash
 cd <项目根目录在WSL中的路径>/buildtools/install/docker
 
-# 构建 dev 镜像
+# 1. 确认 .env 中 DOCKER_TAG=dev（不是 latest）
+grep DOCKER_TAG .env
+
+# 2. 修改 docspace-stack.yml，指定使用 Dockerfile.dev
+# 在 onlyoffice-node-services 下添加 build 配置：
+# build:
+#   context: .
+#   dockerfile: Dockerfile.dev
+
+# 3. 构建 dev 镜像
 docker compose -f docspace-stack.yml build onlyoffice-node-services
+
+# 4. 构建完成后，立即恢复 docspace-stack.yml（移除 build 配置）
+# 这样下次启动会用生产镜像 latest
+
+# 5. 启动 dev 容器（需要先在 docspace-ports.yml 中添加 volume 映射，见下文）
+docker compose -f docspace-stack.yml -f docspace-ports.yml up -d onlyoffice-node-services
 ```
+
+**镜像命名规则**：
+- 生产镜像：`onlyoffice/docspace-node:latest`
+- 开发镜像：`onlyoffice/docspace-node:dev`
 
 ### 启用开发容器
 
-#### 1. 配置代理（如果需要）
+#### 1. 配置 volume 映射
+
+在 `docspace-ports.yml` 中添加源码映射：
+
+```yaml
+onlyoffice-node-services:
+  ports:
+    - "8052:5050"
+  volumes:
+    - /mnt/f/mycode/industry tools/DocSpace/client:/var/www/products/ASC.Management/management:rw
+```
+
+#### 3. 配置代理（如果需要）
 
 容器内访问外网需要通过宿主机代理。在 Ubuntu 终端中执行：
 
@@ -991,7 +1030,7 @@ ip route | grep default | awk '{print $3}'
 curl -x http://<网关IP>:<代理端口> --connect-timeout 10 https://www.google.com
 ```
 
-#### 2. 启动容器
+#### 4. 启动容器
 
 ```bash
 cd <项目根目录在WSL中的路径>/buildtools/install/docker
@@ -1000,7 +1039,7 @@ cd <项目根目录在WSL中的路径>/buildtools/install/docker
 docker compose -f docspace-stack.yml -f docspace-ports.yml up -d onlyoffice-node-services
 ```
 
-#### 3. 进入容器
+#### 5. 进入容器
 
 ```bash
 docker exec -it onlyoffice-node-services bash
