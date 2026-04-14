@@ -18,7 +18,10 @@ import base64
 
 # ============== 配置参数 ==============
 # 从 appsettings.json 中的 core:machinekey 获取
-machine_key = "DocSpace2024CoreMachineKeyForEncryption123!"
+# 注意: 实际 Docker 部署中使用的是 "your_core_machinekey"
+# 可通过以下命令查看实际值:
+#   docker exec onlyoffice-dotnet-services env | grep APP_CORE_MACHINEKEY
+machine_key = "your_core_machinekey"
 
 # 要重置密码的用户信息
 # 默认管理员账号: administrator / wjy@test.com
