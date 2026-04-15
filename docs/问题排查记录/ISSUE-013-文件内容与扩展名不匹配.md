@@ -6,156 +6,221 @@
 |------|------|
 | 问题编号 | ISSUE-013 |
 | 发现时间 | 2026-04-14 |
-| 问题类型 | 文档服务配置/权限问题 |
-| 问题状态 | 🔄 排查中 |
+| 问题类型 | 文档服务配置问题 |
+| 问题状态 | ✅ **已解决** |
 
 ## 问题描述
 
 ### 错误信息
-```
-ONLYOFFICE Document Editor reports an error: code -85, description 打开文件时出错<br>文件内容与文件扩展名不匹配。
-```
 
-### 附加错误信息
 ```
-此文档似乎是由较新版本的 ONLYOFFICE 文档编辑器创建的
+ONLYOFFICE Document Editor reports an error: code -85, description 打开文件时出错<br>文件内容与扩展名不匹配。
 ```
 
-## 🔴 重大发现
+---
 
-### DocumentServer 无法下载文件 - 返回 403 Forbidden
+## 问题根源
 
-**测试命令**：
-```bash
-docker exec onlyoffice-document-server curl -v "http://onlyoffice-router:8092/FileHandler.ashx?action=stream&fileId=4&authKey=test"
-```
+### nginx `/cache` 路由配置错误
 
-**测试结果**：
-```
-HTTP/1.1 403 Forbidden
-您没有权限执行此操作
-```
-
-**结论**：
-- DocumentServer 访问 DocSpace 的 FileHandler 返回 **403 Forbidden**
-- 错误信息是"您没有权限执行此操作"（认证失败）
-- 而不是"文件内容与扩展名不匹配"
-
-### 可能的原因分析
-
-1. **JWT Token 无效或过期**
-   - DocumentServer 收到的 JWT token 无法通过验证
-   - 导致 FileHandler 拒绝下载请求
-
-2. **authKey 无效**
-   - FileHandler 的 authKey 参数用于验证请求
-   - 如果 token/key 不匹配，返回 403
-
-3. **权限传递问题**
-   - DocSpace 传递给 DocumentServer 的文件下载 URL
-   - DocumentServer 无法使用该 URL 下载文件
-
-### 文件元数据检查 ✅
-
-**数据库记录与物理文件完全一致**：
-
-| fileId | 标题 | 数据库大小 | 物理文件大小 | 格式验证 |
-|--------|------|------------|--------------|----------|
-| 1 | ONLYOFFICE ????.pdf | 7663050 | 7663050 | PDF 1.7 ✅ |
-| 4 | ONLYOFFICE ????.docx | 391555 | 391555 | Word 2007+ ✅ |
-| 6 | ?????.xlsx | 6322 | 6322 | Excel 2007+ ✅ |
-
-**结论**：数据库和物理文件完全一致，问题不在文件本身。
-
-## 端到端测试方法 ✅
-
-### 正确的访问 URL
-```
-http://43.135.17.107:8092/doceditor?fileId=4&action=edit
-```
-
-### 登录状态保持方法 ⚠️ 重要
-
-```bash
-# 1. 登录并保存状态
-playwright-cli open http://43.135.17.107:8092/login
-# 填写邮箱（元素引用 e27）
-playwright-cli fill e27 "179537@qq.com"
-# 填写密码（元素引用 e32）
-playwright-cli fill e32 "Admin@123"
-# 点击登录按钮（元素引用 e55）
-playwright-cli click e55
-# 等待登录完成
-sleep 3
-# 保存登录状态到文件
-playwright-cli state-save docspace-login.json
-
-# 2. 后续使用已保存的登录状态
-# 打开浏览器
-playwright-cli -s=docspace-login open http://43.135.17.107:8092/
-# 加载登录状态文件（需要完整路径）
-playwright-cli -s=docspace-login state-load /home/ubuntu/EasyDocs/docspace-login.json
-# 导航到文档编辑器
-playwright-cli -s=docspace-login goto http://43.135.17.107:8092/doceditor?fileId=4&action=edit
-
-# 3. 检查结果
-# 等待页面加载
-sleep 15
-# 截图保存
-playwright-cli -s=docspace-login screenshot
-# 查看控制台错误
-playwright-cli -s=docspace-login console
-```
-
-### 测试账号
-- 用户名：`179537@qq.com`
-- 密码：`Admin@123`
-
-## 当前配置
-
-```json
-{
-  "docServiceUrlApi": "http://43.135.17.107:8092/ds-api/web-apps/apps/api/documents/api.js",
-  "docServiceUrl": "http://43.135.17.107:8092/ds-api/",
-  "docServiceUrlInternal": "http://onlyoffice-document-server:80/",
-  "docServicePortalUrl": "http://onlyoffice-router:8092/",
-  "docServiceSignatureHeader": "AuthorizationJwt",
-  "docServiceSslVerification": false,
-  "isDefault": false
+**错误配置**：
+```nginx
+location ~* ^/cache/ {
+    proxy_pass http://onlyoffice-node-services:5009;  # ❌ 错误！
 }
 ```
 
-## JWT 配置
+**问题分析**：
+1. nginx `/cache` 路由指向 `onlyoffice-node-services:5009`
+2. **node-services 不监听 5009 端口**
+3. 导致 `Connection refused`，nginx 返回 500 Error HTML
+4. DocumentServer 收到 HTML 而不是二进制文件
+5. 报错：文件内容与扩展名不匹配
 
-**DocumentServer local.json**：
-```json
-"secret": {
-  "browser": { "string": "DocSpace2024SecureJwtSecretKey123!" },
-  "inbox": { "string": "DocSpace2024SecureJwtSecretKey123!" },
-  "outbox": { "string": "DocSpace2024SecureJwtSecretKey123!" },
-  "session": { "string": "DocSpace2024SecureJwtSecretKey123!" }
+---
+
+## 修复方案
+
+### 修改 nginx 配置
+
+将 `/cache` 路由指向正确的服务 **DocumentServer (端口 80)**：
+
+```nginx
+location ~* ^/cache/ {
+    proxy_pass http://onlyoffice-document-server:80;
+    proxy_redirect off;
 }
 ```
 
-## 待排查
+### 修复步骤
 
-1. 检查 DocSpace 传递给 DocumentServer 的 JWT token 是否有效
-2. 检查 FileHandler 的 authKey 验证逻辑
-3. 检查 DocumentServer 下载文件的请求流程
+1. 删除错误的 `/cache` 路由配置
+2. 添加正确的 `/cache` 路由，指向 `onlyoffice-document-server:80`
+
+---
+
+## 服务端口配置（已确认）
+
+### node-services (172.18.0.4)
+
+| 端口 | 服务名称 | 功能 | 备注 |
+|------|----------|------|------|
+| 5011 | ASC.Login | 登录服务 | Node.js 前端服务 |
+| 5013 | ASC.Editors | 文档编辑器前端 | doceditor 应用 |
+| 5015 | ASC.Management | 管理服务 | 管理界面 |
+| 5099 | ASC.Sdk | SDK 服务 | 提供 SDK 相关功能 |
+| 9834 | ASC.SsoAuth | SSO 认证服务 | SSO 单点登录 |
+| 9899 | ASC.Socket.IO | WebSocket 服务 | 实时通信 |
+| **5009** | ❌ **无服务** | - | 不存在此端口 |
+
+### dotnet-services (172.18.0.5)
+
+| 端口 | 服务名称 | 功能 | 备注 |
+|------|----------|------|------|
+| 5000 | ASC.Api | API 服务 | 主 API 入口 |
+| 5004 | ASC.People | 人员服务 | 用户管理 |
+| 5007 | ASC.Files | 文件服务 | **主文件服务，有 FileHandler** |
+| 5009 | ASC.Files.Service | 文件服务后端 | 后端处理，无 FileHandler |
+| 5012 | ASC.Data.Backup | 备份服务 | 数据备份 |
+| 5033 | ASC.HealthChecks | 健康检查 | 服务健康检查 |
+
+### java-services (172.18.0.7)
+
+| 端口 | 服务名称 | 功能 | 备注 |
+|------|----------|------|------|
+| 8080 | ASC.Identity.Authorization | 授权服务 | Java Spring Boot |
+| 9090 | ASC.Identity.Registration | 注册服务 | Java Spring Boot |
+
+### document-server (172.18.0.5)
+
+| 端口 | 服务名称 | 功能 | 备注 |
+|------|----------|------|------|
+| 80 | DocumentServer | 文档编辑服务 | Node.js Express 应用 |
+
+---
+
+## /cache 缓存机制分析
+
+### DocumentServer service worker 中的 /cache
+
+根据 `document_editor_service_worker.js`：
+
+```javascript
+const g_fifoPrefix = 'cache/files/data/';
+const g_fifoDocIdParams = ['shardkey', 'WOPISrc'];
+```
+
+**`/cache/files/data/` 是 DocumentServer service worker 的客户端缓存路径**。
+
+### 工作原理
+
+1. **DocumentServer 的 service worker 拦截请求**
+   - 匹配 `/cache/files/data/` URL 模式
+
+2. **缓存策略**
+   - FIFO 缓存，用于动态文档文件
+   - 最大 3 个 unique docids
+   - 每个文件最大 500 MB
+   - DocId TTL: 10 分钟
+
+3. **缓存流程**
+   ```
+   请求 → Service Worker → 检查缓存
+                            ├── 命中 → 返回缓存文件
+                            └── 未命中 → 从网络获取 → 缓存 → 返回
+   ```
+
+---
 
 ## 排查时间线
 
-| 时间 | 发现 |
-|------|------|
-| 08:40 | 首次发现错误，成功复现 |
-| 11:40 | 更新排查记录，确认错误现象 |
-| 11:50 | 检查存储文件内容 - 内容与扩展名匹配 ✅ |
-| 12:00 | 用户确认所有文件都报错，包括新建的文件 |
-| 12:10 | 发现 JWT 密钥不一致 |
-| 12:30 | 用户确认配置页面保存时报错 |
-| 12:35 | 澄清问题理解：连接正常但文件内容检测失败 |
-| 12:45 | 读取当前配置，发现配置参数 |
-| 12:50 | 确认正确测试 URL |
-| 12:55 | 掌握登录状态保持方法 ✅ |
-| 13:05 | 正确获取截图 - 确认错误仍存在 ❌ |
-| **13:08** | **重大发现：DocumentServer 访问 FileHandler 返回 403 Forbidden** 🔴 |
+| 时间 | 发现/操作 |
+|------|----------|
+| 2026-04-14 08:40 | 首次发现错误 |
+| 2026-04-14 13:08 | 发现 DocumentServer 访问 FileHandler 返回 403 |
+| 2026-04-14 13:15 | 发现 JWT 密钥不一致 |
+| 2026-04-14 15:30 | 修复 JWT 密钥一致性 |
+| 2026-04-14 15:40 | 添加 docx 到 downloadFileAllowExt |
+| 2026-04-15 05:40 | 发现 /cache 路由返回 HTML 问题 |
+| 2026-04-15 06:30 | 确认 nginx /cache 路由指向错误的服务 |
+| 2026-04-15 07:00 | 分析 ASC.Files.Service 工作原理 |
+| 2026-04-15 07:30 | 确认 /cache 路由不是 buildtools 原始配置 |
+| 2026-04-15 08:00 | 分析 DocumentServer service worker 中的 /cache 用途 |
+| 2026-04-15 08:30 | 发现 java-services 实际监听 8080/9090 |
+| 2026-04-15 09:00 | 确认 /cache 应该由 DocumentServer (端口 80) 处理 |
+| 2026-04-15 09:15 | 修改 nginx /cache 路由配置 |
+| 2026-04-15 09:20 | **端到端测试成功！编辑器正常打开！** |
+
+---
+
+## 验证结果
+
+### 修复前
+
+```
+[ERROR] code -85, description 打开文件时出错<br>文件内容与扩展名不匹配。
+```
+
+### 修复后
+
+```
+[LOG] ONLYOFFICE Document Editor is ready
+[LOG] ONLYOFFICE Document Editor is opened in mode edit
+```
+
+**编辑器成功打开，没有错误！**
+
+---
+
+## 修复命令
+
+```bash
+# 备份 nginx 配置
+docker exec onlyoffice-router cp /etc/nginx/conf.d/onlyoffice.conf /etc/nginx/conf.d/onlyoffice.conf.bak-20260415
+
+# 添加正确的 /cache 路由
+docker exec onlyoffice-router sed -i '/location \/ {/a\        location ~* ^/cache/ {\n                proxy_pass http://onlyoffice-document-server:80;\n                proxy_redirect off;\n        }\n' /etc/nginx/conf.d/onlyoffice.conf
+
+# 测试配置
+docker exec onlyoffice-router nginx -t
+
+# 重新加载 nginx
+docker exec onlyoffice-router nginx -s reload
+```
+
+---
+
+## 后续观察
+
+1. 浏览器控制台显示 `ONLYOFFICE Document Editor is ready` 和 `opened in mode edit`
+2. 截图大小从 48KB 增加到 133KB，内容更丰富
+3. 未出现 "文件内容与扩展名不匹配" 错误
+
+### 仍存在的控制台错误（不影响功能）
+
+```
+[ERROR] Failed to load resource: 404 (Not Found) - 插件资源
+TypeError: Cannot set properties of undefined (setting 'save') - 插件本地存储
+TypeError: AI.loadResourceAsText is not a function - AI 插件
+```
+
+这些是插件相关的错误，与核心文档编辑功能无关。
+
+---
+
+## 总结
+
+### 问题根源
+
+nginx 配置中 `/cache` 路由指向了不存在服务的端口（`onlyoffice-node-services:5009`），导致 DocumentServer 无法下载文件。
+
+### 解决方案
+
+将 `/cache` 路由指向正确的服务（`onlyoffice-document-server:80`）。
+
+### 关键发现
+
+1. **`/cache` 是 DocumentServer service worker 的客户端缓存路径**
+2. **`/cache` 请求应该由 DocumentServer server 端处理（端口 80）**
+3. **nginx 配置中 `/cache` 路由是部署时错误添加的**
+4. **buildtools 原始配置中没有 `/cache` 路由**
