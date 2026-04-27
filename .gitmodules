@@ -16,3 +16,6 @@
 [submodule "DocumentServer"]
 	path = DocumentServer
 	url = https://github.com/ghforwjy/DocumentServer.git
+[submodule "EasyDocs-prototype"]
+	path = EasyDocs-prototype
+	url = https://github.com/ghforwjy/EasyDocs-prototype.git
