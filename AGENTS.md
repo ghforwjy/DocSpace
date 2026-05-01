@@ -98,3 +98,39 @@ playwright-cli console       # 控制台错误
 playwright-cli screenshot    # 截图
 ```
 
+## Playwright-cli 登录状态管理
+
+### 登录并保存状态
+
+```bash
+# 1. 打开登录页面
+playwright-cli open http://43.135.17.107:8092/login
+
+# 2. 填写凭据（用 playwright-cli state 查看元素引用）
+playwright-cli fill e27 "179537@qq.com"    # 用户名
+playwright-cli fill e32 "Admin@123"        # 密码
+playwright-cli click e55                    # 点击登录
+
+# 3. 保存登录状态
+sleep 3
+playwright-cli state-save docspace-login.json
+playwright-cli close
+```
+
+### 恢复登录状态访问受保护页面
+
+```bash
+# 1. 恢复状态并打开登录页
+playwright-cli open http://43.135.17.107:8092/login
+playwright-cli state-load docspace-login.json
+
+# 2. 用 goto 导航（保持登录状态）
+playwright-cli goto http://43.135.17.107:8092/doceditor?fileId=2
+sleep 5
+playwright-cli screenshot
+```
+
+**关键**：`goto` 在当前页面导航保持登录，`open` 开新页面会丢失状态。
+
+**登录凭据**：用户名 `179537@qq.com`，密码 `Admin@123`
+
