@@ -4,50 +4,108 @@
 
 **服务模块**: 文件服务
 **Controller**: `server/products/ASC.Files/Server/Api/SecurityController.cs`
+**请求基路径**: `/api/2.0/files`
+
+---
+
+## 🔑 认证方式
+
+所有 API 请求需携带 DocSpace 认证 Cookie（`asc_auth_key`）或 Bearer Token。
 
 ---
 
 ## 🔐 权限管理核心 API
 
-### 1️⃣ 分享文件
+### 1️⃣ 分享房间（PUT share）
 
-**接口**: `POST /api/2.0/files/file/{fileId}/share`
+**接口**: `PUT /api/2.0/files/rooms/{roomId}/share`
 
-**功能**: 分享文件给用户或群组
+**源码 DTO**: `RoomInvitationRequestDto.cs` + `RoomInvitation.cs`
 
-**请求参数**:
+**功能**: 添加/移除房间成员
+
+**添加成员请求参数**:
 ```json
 {
-  "share": {
-    "access": "ReadWrite",
-    "users": ["user-guid-1", "user-guid-2"],
-    "groups": ["group-guid-1"]
-  }
+  "invitations": [
+    { "id": "用户GUID", "access": 2 }
+  ],
+  "notify": false
 }
 ```
 
-**权限类型**:
-- `Read`: 只读
-- `ReadWrite`: 读写
-- `FullAccess`: 完全控制
+**移除成员请求参数**:
+```json
+{
+  "invitations": [
+    { "id": "用户GUID", "access": 0 }
+  ],
+  "notify": false
+}
+```
+
+**字段说明**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `invitations` | array | ✅ | 邀请列表（**不是 "share"！**） |
+| `invitations[].id` | string(GUID) | ✅ | DocSpace 用户 GUID |
+| `invitations[].access` | number | ✅ | 权限枚举值（0=移除） |
+| `notify` | boolean | ❌ | 是否通知用户，默认 false |
+| `message` | string | ❌ | 通知消息内容 |
+| `force` | boolean | ❌ | 是否强制添加 |
+
+**FileShare 枚举值**:
+
+| 值 | 名称 | 说明 |
+|----|------|------|
+| 0 | None | 无权限（**用于移除成员**） |
+| 1 | ReadWrite | 读写 |
+| 2 | Read | 只读 |
+| 3 | Restrict | 限制 |
+| 4 | Varies | 可变 |
+| 5 | Review | 审阅 |
+| 6 | Comment | 评论 |
+| 7 | FillForms | 填表 |
+| 8 | CustomFilter | 自定义过滤 |
+| 9 | RoomManager | 房间管理员 |
 
 **调用示例**:
 ```javascript
-async function shareFile(fileId, userId, accessLevel) {
+async function addRoomMember(roomId, userGuid, access, cookie) {
   const response = await fetch(
-    `{baseUrl}/api/2.0/files/file/${fileId}/share`,
+    `{baseUrl}/api/2.0/files/rooms/${roomId}/share`,
     {
-      method: 'POST',
+      method: 'PUT',
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        'Cookie': cookie
       },
       body: JSON.stringify({
-        share: {
-          access: accessLevel,
-          users: [userId]
-        }
+        invitations: [{ id: userGuid, access }],
+        notify: false
+      })
+    }
+  );
+  return await response.json();
+}
+
+async function removeRoomMember(roomId, userGuid, cookie) {
+  const response = await fetch(
+    `{baseUrl}/api/2.0/files/rooms/${roomId}/share`,
+    {
+      method: 'PUT',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Cookie': cookie
+      },
+      body: JSON.stringify({
+        invitations: [{ id: userGuid, access: 0 }],
+        notify: false
       })
     }
   );
@@ -57,70 +115,122 @@ async function shareFile(fileId, userId, accessLevel) {
 
 ---
 
-### 2️⃣ 查看文件共享信息
+### 2️⃣ 查看房间共享信息
 
-**接口**: `GET /api/2.0/files/file/{fileId}/share`
+**接口**: `GET /api/2.0/files/rooms/{roomId}/share`
 
-**功能**: 获取文件共享信息
+**功能**: 获取房间成员列表
 
 **响应示例**:
 ```json
 {
-  "fileId": 123,
-  "shared": [
+  "response": [
     {
-      "userId": "user-guid",
-      "displayName": "张三",
-      "access": "ReadWrite",
-      "sharedBy": "admin",
-      "sharedOn": "2026-04-23T12:00:00.000Z"
+      "access": 1,
+      "sharedTo": {
+        "id": "66faa6e4-f133-11ea-b126-00ffeec8b4ef",
+        "userName": "administrator",
+        "displayName": "Administrator",
+        "email": "admin@example.com"
+      },
+      "isOwner": true,
+      "canEditAccess": false,
+      "canRevoke": false
+    },
+    {
+      "access": 2,
+      "sharedTo": {
+        "id": "用户GUID",
+        "userName": "zhang.ming",
+        "displayName": "明张"
+      },
+      "isOwner": false,
+      "canEditAccess": true,
+      "canRevoke": true
     }
-  ]
+  ],
+  "count": 2
 }
 ```
 
 ---
 
-### 3️⃣ 取消文件共享
+### 3️⃣ 分享文件/文件夹
 
-**接口**: `DELETE /api/2.0/files/file/{fileId}/share`
+**接口**: `PUT /api/2.0/files/file/{fileId}/share` 或 `PUT /api/2.0/files/folder/{folderId}/share`
 
-**功能**: 取消文件共享
+**功能**: 设置文件或文件夹的共享权限
+
+> ⚠️ 文件/文件夹的 share 格式可能与房间 share 不同，具体请参考 DocSpace 源码中 `AceWrapper` 相关 DTO。
 
 ---
 
-### 4️⃣ 分享文件夹
+## ⚠️ 常见错误格式（不要使用！）
 
-**接口**: `POST /api/2.0/files/folder/{folderId}/share`
+以下请求体格式返回 `200 OK` 但**不会实际添加成员**：
 
-**功能**: 分享文件夹
+```javascript
+// ❌ 错误1：使用 "share" 键而非 "invitations"
+{ share: [{ id: "GUID", isGroup: false, access: 2 }] }
+
+// ❌ 错误2：使用 POST 方法（返回 405 Method Not Allowed）
+POST /api/2.0/files/rooms/{id}/share
+
+// ❌ 错误3：使用 DELETE 方法移除成员（不生效）
+DELETE /api/2.0/files/rooms/{id}/share
+body: { userIds: ["GUID"] }
+```
+
+**关键要点**：
+1. DocSpace 的 PUT share API 静默接受错误格式（返回 200），但不会执行操作
+2. 必须使用 `invitations` 键，不是 `share`
+3. 每个 invitation 只需 `id` 和 `access` 两个字段，不需要 `isGroup`
+4. 移除成员用 `access: 0`，不是 DELETE
 
 ---
 
 ## 📋 权限管理完整示例
 
-### 完整权限管理流程
+### 房间成员管理流程
 ```javascript
-const fileId = 123;
-const userId = 'user-guid-here';
+const DS_BASE = 'http://localhost:8092';
+const roomId = 84;
+const userGuid = '用户GUID';
 
 // 1. 查看当前共享信息
-const currentShare = await getShareInfo(fileId);
-console.log('当前共享:', currentShare);
+const currentShare = await fetch(`${DS_BASE}/api/2.0/files/rooms/${roomId}/share`, {
+  headers: { 'Cookie': cookie }
+});
+const shareData = await currentShare.json();
+console.log('当前成员数:', shareData.response.length);
 
-// 2. 分享文件给用户
-const shareResult = await shareFile(fileId, userId, 'ReadWrite');
-console.log('分享结果:', shareResult);
+// 2. 添加成员（只读权限）
+await fetch(`${DS_BASE}/api/2.0/files/rooms/${roomId}/share`, {
+  method: 'PUT',
+  headers: { 'Content-Type': 'application/json', 'Cookie': cookie },
+  body: JSON.stringify({
+    invitations: [{ id: userGuid, access: 2 }],
+    notify: false
+  })
+});
 
 // 3. 验证共享是否成功
-const updatedShare = await getShareInfo(fileId);
-console.log('更新后的共享:', updatedShare);
+const updatedShare = await fetch(`${DS_BASE}/api/2.0/files/rooms/${roomId}/share`, {
+  headers: { 'Cookie': cookie }
+});
+const updatedData = await updatedShare.json();
+const member = updatedData.response.find(m => m.sharedTo.id === userGuid);
+console.log('成员已添加:', !!member, '权限:', member?.access);
 
-// 4. 如果需要，取消共享
-if (needUnshare) {
-  await unshareFile(fileId);
-  console.log('取消共享成功');
-}
+// 4. 移除成员（使用 access: 0）
+await fetch(`${DS_BASE}/api/2.0/files/rooms/${roomId}/share`, {
+  method: 'PUT',
+  headers: { 'Content-Type': 'application/json', 'Cookie': cookie },
+  body: JSON.stringify({
+    invitations: [{ id: userGuid, access: 0 }],
+    notify: false
+  })
+});
 ```
 
 ---
@@ -129,5 +239,7 @@ if (needUnshare) {
 
 1. **权限继承**: 文件夹权限会继承到子文件和子文件夹
 2. **最低权限**: 用户权限以最低的为准（继承权限 + 直接权限）
-3. **分享范围**: 可以分享给单个用户、用户组或所有人
-4. **权限管理**: 需要有相应的权限才能进行分享操作
+3. **静默失败**: DocSpace PUT share API 对错误格式静默返回 200，必须通过 GET share 验证操作是否生效
+4. **invitations 格式**: 必须使用 `{ invitations: [{ id, access }], notify }` 格式
+5. **移除成员**: 使用 `access: 0`（FileShare.None），不是 DELETE
+6. **加密房间**: `private: true` 的房间添加成员时，成员必须拥有加密密钥，否则返回 403

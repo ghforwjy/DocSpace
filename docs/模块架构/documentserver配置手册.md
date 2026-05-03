@@ -231,24 +231,29 @@ location ~* /clients {
 
 ## 四、问题分析
 
-### 4.1 JWT Secret 不匹配问题 ⚠️
+### 4.1 JWT Secret 不匹配问题 ✅ 已解决
 
 **问题描述**：
 
 | 容器 | JWT_SECRET 值 |
 |------|--------------|
-| `onlyoffice-document-server` | `your_jwt_secret` (默认值) |
+| `onlyoffice-document-server` | `DocSpace2024SecureJwtSecretKey123!` |
 | `onlyoffice-dotnet-services` | `DocSpace2024SecureJwtSecretKey123!` |
 | `onlyoffice-java-services` | `DocSpace2024SecureJwtSecretKey123!` |
 | `onlyoffice-node-services` | `DocSpace2024SecureJwtSecretKey123!` |
 
-**影响**：
+**状态**：✅ 所有容器 JWT_SECRET 已统一为 `DocSpace2024SecureJwtSecretKey123!`
 
-当后端服务（如 .NET、Java、Node 服务）尝试调用 DocumentServer API 时，会因为 JWT 密钥不一致导致验证失败，DocumentServer 会拒绝请求。
+**历史问题**：
+- 之前 DocumentServer 使用默认值 `your_jwt_secret`，与 DocSpace 后端不一致
+- 导致文档编辑器报错 errorCode -20（"文档安全令牌的格式不正确"）
+- 修复方式：确保 `.env` 中 `DOCUMENT_SERVER_JWT_SECRET` 与 DocumentServer 容器的环境变量一致
 
-**建议**：
-
-DocumentServer 的 `JWT_SECRET` 应该修改为与其他服务一致的 `DocSpace2024SecureJwtSecretKey123!`。
+**注意事项**：
+- dotnet 容器启动时，`docker-entrypoint.py` 会检查 `DOCUMENT_SERVER_URL_EXTERNAL` 的连通性
+- 如果该地址在容器内不可达（如使用 `localhost`），entrypoint 会删除 docservice 配置并用默认值重建
+- 这会导致 `secret.value` 变回默认值 `"secret"`，再次引发 JWT 不匹配
+- 解决方案：确保 `.env` 中 `APP_URL_PORTAL` 使用 Docker 内部网络地址（如 `http://onlyoffice-router:8092`）
 
 ### 4.2 版本号异常
 
