@@ -55,3 +55,16 @@ publish/
 
 .idea
 easyproxy/
+
+# Playwright test sessions
+.playwright-cli/
+**/.playwright-cli/
+
+# Auth data files
+auth.json
+**/auth.json
+docspace-login.json
+
+# Test reports
+tests/test_user_api_report.json
+tests/test_version_api_report.json
